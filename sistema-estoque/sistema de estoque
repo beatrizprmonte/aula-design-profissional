@@ -1,8 +1,13 @@
-#SISTEMA DE ESTOQUE QUE CONTROLA RETIRADA DE PRODUTOS E CONSULTA ESTOQUE E O HISTORICO DE RETIRADAS.
+#SISTEMA DE ESTOQUE: RETIRADA, REPOSIÇÃO, CONSULTA, HISTÓRICO E LOGIN COM SENHA
 
-#INICIO DO  COD
 import random
+from datetime import datetime #SISTEMA GUARDA DATA E HORA DE CADA MOVIMENTAÇÃO
+from getpass import getpass #NÃO MOSTRA A SENHA ENQUANTO O USUARIO DIGITA NA TELA
 
+
+# ---------------------------------------------------------------
+# DADOS
+# ---------------------------------------------------------------
 estoque = {
     "mouse": 10,
     "monitor": 5,
@@ -17,21 +22,166 @@ estoque = {
     "water cooler": 5,
 }
 
+# Cada registro: {"data", "usuario", "tipo", "produto", "quantidade"}
 historico = []
-prosseguir_opcao = 0
-LIMITE_BAIXO = 5
 
-#ESTRTURA DAS FUNÇÕES
+LIMITE_BAIXO = 5
+MAX_TENTATIVAS = 3
+
+# admin    -> pode tudo
+# operador -> pode consultar, retirar e ver histórico/relatório
+usuarios = {
+    "admin": {"senha": "admin123", "perfil": "admin"},
+    "operador": {"senha": "1234", "perfil": "operador"},
+}
+
+
+# FUNÇÕES 
+
 def ler_numero(msg):
+    """Lê um inteiro maior que zero. Retorna None se inválido."""
     try:
         valor = int(input(msg))
-        if valor <= 0:
-            print('Digite um número maior que zero.')
-            return None
-        return valor
     except ValueError:
         print('Valor inválido, digite apenas números.')
         return None
+    if valor <= 0:
+        print('Digite um número maior que zero.')
+        return None
+    return valor
+
+
+def confirmar(msg):
+    """Pergunta S/N e repete até receber uma resposta válida."""
+    while True:
+        resp = input(f'{msg} (S/N) ').strip().upper()
+        if resp in ('S', 'N'):
+            return resp == 'S'
+        print('Responda apenas com S ou N.')
+
+
+def registrar(usuario, tipo, produto, quantidade):
+    historico.append({
+        "data": datetime.now().strftime('%d/%m/%Y %H:%M:%S'),
+        "usuario": usuario,
+        "tipo": tipo,
+        "produto": produto,
+        "quantidade": quantidade,
+    })
+
+
+def login():
+    """Retorna (usuario, perfil) ou None após falhar o limite de tentativas."""
+    print('\n===== LOGIN =====')
+    for tentativa in range(1, MAX_TENTATIVAS + 1):
+        nome = input('Usuário: ').strip().lower()
+        senha = getpass('Senha: ')
+        dados = usuarios.get(nome)
+        if dados and dados["senha"] == senha:
+            print(f'\nBem-vindo, {nome}! (perfil: {dados["perfil"]})')
+            return nome, dados["perfil"]
+        restantes = MAX_TENTATIVAS - tentativa
+        if restantes:
+            print(f'Usuário ou senha incorretos. Tentativas restantes: {restantes}')
+    print('Número máximo de tentativas excedido.')
+    return None
+
+
+def exige_admin(perfil):
+    if perfil != 'admin':
+        print('⛔ Acesso negado: esta opção é apenas para administradores.')
+        return False
+    return True
+
+def consultar_estoque():
+    print('\n--- ESTOQUE ATUAL ---')
+    for produto, quantidade in estoque.items():
+        print(f'Produto: {produto} | Quantidade: {quantidade}')
+
+
+def retirar_produtos(usuario):
+    print('\n--- RETIRADA DE PRODUTOS ---')
+    while True:
+        produto = input('\nQual item você deseja retirar do estoque? ').lower().strip()
+
+        if produto not in estoque:
+            print(f"Produto '{produto}' não encontrado no estoque.")
+        elif estoque[produto] == 0:
+            print(f"O produto '{produto}' está esgotado.")
+        else:
+            qtd = ler_numero(f'Quantas unidades de "{produto}" deseja retirar? ')
+            if qtd is not None:
+                if qtd > estoque[produto]:
+                    print(f"Quantidade insuficiente! Temos apenas {estoque[produto]} "
+                          f"unidade(s) de '{produto}'.")
+                else:
+                    estoque[produto] -= qtd
+                    registrar(usuario, 'RETIRADA', produto, qtd)
+                    print(f"Retirada de {qtd} {produto}(s) realizada com sucesso! "
+                          f"Estoque restante: {estoque[produto]}")
+                    if estoque[produto] == 0:
+                        print(f"🔴 Atenção: '{produto}' ficou ESGOTADO.")
+                    elif estoque[produto] <= LIMITE_BAIXO:
+                        print(f"⚠️ Atenção: estoque baixo de '{produto}'.")
+
+        if not confirmar('\nDeseja retirar mais algum produto?'):
+            break
+
+
+def ver_historico():
+    print('\n--- HISTÓRICO DE MOVIMENTAÇÕES ---')
+    if not historico:
+        print('Nenhuma movimentação registrada ainda.')
+        return
+    for i, reg in enumerate(historico, start=1):
+        print(f"{i:>3}. [{reg['data']}] {reg['tipo']:<9} | "
+              f"{reg['produto']} x{reg['quantidade']} | por {reg['usuario']}")
+
+
+def repor_estoque(usuario, perfil):
+    if not exige_admin(perfil):
+        return
+    print('\n--- REPOSIÇÃO DE ESTOQUE ---')
+    produto = input('Qual produto deseja repor? ').lower().strip()
+    if produto not in estoque:
+        print(f"Produto '{produto}' não encontrado. Use a opção de cadastrar produto novo.")
+        return
+    qtd = ler_numero(f'Quantas unidades de "{produto}" chegaram? ')
+    if qtd is not None:
+        estoque[produto] += qtd
+        registrar(usuario, 'REPOSIÇÃO', produto, qtd)
+        print(f"Reposição feita! Estoque de '{produto}': {estoque[produto]}")
+
+
+def cadastrar_produto(usuario, perfil):
+    if not exige_admin(perfil):
+        return
+    print('\n--- CADASTRAR PRODUTO NOVO ---')
+    produto = input('Nome do produto: ').lower().strip()
+    if produto == '':
+        print('O nome não pode ficar vazio.')
+    elif produto in estoque:
+        print('Esse produto já existe! Use a opção de repor estoque.')
+    else:
+        qtd = ler_numero('Quantidade inicial: ')
+        if qtd is not None:
+            estoque[produto] = qtd
+            registrar(usuario, 'CADASTRO', produto, qtd)
+            print(f"Produto '{produto}' cadastrado com {qtd} unidade(s)!")
+
+
+def buscar_produto():
+    print('\n--- BUSCAR PRODUTO ---')
+    termo = input('Digite parte do nome: ').lower().strip()
+    if termo == '':
+        print('Digite pelo menos uma letra para buscar.')
+        return
+    achados = {p: q for p, q in estoque.items() if termo in p}
+    if not achados:
+        print('Nenhum produto encontrado.')
+    for p, q in achados.items():
+        print(f'Produto: {p} | Quantidade: {q}')
+
 
 def estoque_baixo():
     print('\n--- ALERTA DE ESTOQUE BAIXO ---')
@@ -44,54 +194,26 @@ def estoque_baixo():
         else:
             print(f'⚠️ {p}: apenas {q} unidade(s)')
 
-def repor_estoque():
-    print('\n--- REPOSIÇÃO DE ESTOQUE ---')
-    produto = input('Qual produto deseja repor? ').lower()
-    if produto not in estoque:
-        print(f"Produto '{produto}' não encontrado. Use a opção de cadastrar produto novo.")
-        return
-    qtd = ler_numero(f'Quantas unidades de "{produto}" chegaram? ')
-    if qtd:
-        estoque[produto] += qtd
-        print(f"Reposição feita! Estoque de '{produto}': {estoque[produto]}")
 
-def cadastrar_produto():
-    print('\n--- CADASTRAR PRODUTO NOVO ---')
-    produto = input('Nome do produto: ').lower().strip()
-    if produto == '':
-        print('O nome não pode ficar vazio.')
-    elif produto in estoque:
-        print('Esse produto já existe! Use a opção de repor estoque.')
-    else:
-        qtd = ler_numero('Quantidade inicial: ')
-        if qtd:
-            estoque[produto] = qtd
-            print(f"Produto '{produto}' cadastrado com {qtd} unidade(s)!")
+def totais_retirados():
+    totais = {}
+    for reg in historico:
+        if reg['tipo'] == 'RETIRADA':
+            totais[reg['produto']] = totais.get(reg['produto'], 0) + reg['quantidade']
+    return totais
 
-def buscar_produto():
-    print('\n--- BUSCAR PRODUTO ---')
-    termo = input('Digite parte do nome: ').lower().strip()
-    achados = {p: q for p, q in estoque.items() if termo in p}
-    if not achados:
-        print('Nenhum produto encontrado.')
-    for p, q in achados.items():
-        print(f'Produto: {p} | Quantidade: {q}')
 
 def relatorio():
     print('\n===== RELATÓRIO DO ESTOQUE =====')
     print(f'Produtos cadastrados: {len(estoque)}')
     print(f'Total de unidades em estoque: {sum(estoque.values())}')
 
-    mais = max(estoque, key=estoque.get)
-    menos = min(estoque, key=estoque.get)
-    print(f'Maior estoque: {mais} ({estoque[mais]} un.)')
-    print(f'Menor estoque: {menos} ({estoque[menos]} un.)')
+    maior = max(estoque.values())
+    menor = min(estoque.values())
+    print(f"Maior estoque ({maior} un.): {', '.join(p for p, q in estoque.items() if q == maior)}")
+    print(f"Menor estoque ({menor} un.): {', '.join(p for p, q in estoque.items() if q == menor)}")
 
-    retiradas = {}
-    for i in range(0, len(historico), 2):
-        item, qtd = historico[i], historico[i + 1]
-        retiradas[item] = retiradas.get(item, 0) + qtd
-
+    retiradas = totais_retirados()
     if retiradas:
         print('\nRetiradas por produto:')
         for item, total in sorted(retiradas.items(), key=lambda x: x[1], reverse=True):
@@ -101,118 +223,70 @@ def relatorio():
     else:
         print('\nNenhuma retirada realizada ainda.')
 
-#ESQUELETO DO COD
-while True:
-    print('\n===== MENU DE ESTOQUE =====')
-    print('1 - Consultar estoque')
-    print('2 - Retirar produto')
-    print('3 - Ver histórico de retiradas')
-    print('4 - Sair')
-    print('5 - Repor estoque')
-    print('6 - Cadastrar produto novo')
-    print('7 - Buscar produto')
-    print('8 - Alerta de estoque baixo')
-    print('9 - Relatório do estoque')
-
-    
-    opcao = int(input('\nEscolha uma opção: '))
-    if opcao == 1:
-        print('\n--- ESTOQUE ATUAL ---')
-        for produto, quantidade in estoque.items():
-            print(f'Produto: {produto} | Quantidade: {quantidade}')
-        prosseguir_opcao= int(input('\nSe você deseja prosseguir e realizar a retirada de algum produto digite 1, para sair digite 2: '))
-
-    if prosseguir_opcao == 2:
-        print('Encerrando programa...')
-        break
-
-    elif opcao == 2 or prosseguir_opcao == 1:
-
-        item_retirar = input('\nQual item você deseja retirar do estoque? ').lower()
-        if item_retirar in estoque:
-            qtd_item = int(input(f'\nQuantas unidades de "{item_retirar}" deseja retirar? '))
-            if qtd_item <= estoque[item_retirar]:
-
-                historico.append(item_retirar)
-                historico.append(qtd_item)
-
-                estoque[item_retirar] = estoque[item_retirar] - qtd_item
-                print(f'Retirada de {qtd_item} {item_retirar}(s)')
-                print(f"Retirada realizada com sucesso! Estoque restante de '{item_retirar}': {estoque[item_retirar]}")
-                retirar_novamente = input('\nVocê gostaria de retirar mais algum produto?(S/N) ').upper()
-
-            else:
-                print(f"Quantidade insuficiente! Temos apenas {estoque[item_retirar]} unidade(s) de '{item_retirar}' em estoque.")
-                retirar_novamente= input('você deseja inserir novamente um produto com uma quantidade valida?(S/N) ').upper()
+    total_repostos = sum(r['quantidade'] for r in historico if r['tipo'] == 'REPOSIÇÃO')
+    print(f'Total de unidades repostas: {total_repostos}')
 
 
-        else:
-            print(f"Produto '{item_retirar}' não encontrado no estoque.")
-            retirar_novamente= input('você deseja inserir novamente um produto?(S/N) ').upper()
-        while retirar_novamente == 'S':
+def encerrar():
+    print('\nEncerrando programa...')
+    retiradas = totais_retirados()
+    if retiradas:
+        sorteado = random.choice(list(retiradas))
+        print(f'O item sorteado da rodada, baseado na movimentação de estoque, foi [{sorteado}]!')
 
-            item_retirar = input('\nQual item você deseja retirar do estoque? ').lower()
-            if item_retirar in estoque:
-                qtd_item = int(input(f'\nQuantas unidades de "{item_retirar}" deseja retirar? '))
-                if qtd_item <= estoque[item_retirar]:
-                    historico.append(item_retirar)
-                    historico.append(qtd_item)
 
-                    estoque[item_retirar] = estoque[item_retirar] - qtd_item
-                    print(f'Retirada de {qtd_item} {item_retirar}(s)')
-                    print(f"Retirada realizada com sucesso! Estoque restante de '{item_retirar}': {estoque[item_retirar]}")
-                    retirar_novamente = input('\nVocê gostaria de retirar mais algum produto?(S/N) ').upper()
-                else:
-                    print(f"Quantidade insuficiente! Temos apenas {estoque[item_retirar]} unidade(s) de '{item_retirar}' em estoque.")
-                    item_retirar = input('\nQual item você deseja retirar do estoque? ').lower()
-                    retirar_novamente= input('você deseja inserir novamente um produto com uma quantidade valida?(S/N) ').upper()
+# PROGRAMA PRINCIPAL
 
-            else:
-                print(f"Produto '{item_retirar}' não encontrado no estoque.")
-                retirar_novamente= input('você deseja inserir novamente um produto?(S/N) ').upper()
+def main():
+    sessao = login()
+    if sessao is None:
+        return
+    usuario, perfil = sessao
 
-        if retirar_novamente == 'N':
-            verificacao = input('voce deseja verificar o historico de itens retirados até o momento e sua quantidade?(S/N) ').upper()
+    while True:
+        print(f'\n===== MENU DE ESTOQUE ({usuario} - {perfil}) =====')
+        print('1 - Consultar estoque')
+        print('2 - Retirar produto')
+        print('3 - Ver histórico de movimentações')
+        print('4 - Repor estoque (admin)')
+        print('5 - Cadastrar produto novo (admin)')
+        print('6 - Buscar produto')
+        print('7 - Alerta de estoque baixo')
+        print('8 - Relatório do estoque')
+        print('9 - Sair')
 
-            if verificacao == 'S':
-                print("\n--- HISTÓRICO DE RETIRADAS ---")
-                if len(historico) == 0:
-                    print("Nenhuma retirada realizada ainda.")
-                else:
-                    print(f'Os itens retirados e suas quantidades até o momento foram: {historico}.')
-                    if historico:
-                        ganhador = random.choice(historico)
-                        print('\nEncerrando o sistema...')
-                        print(f'O item sorteado da rodada, baseado na movimentação de estoque foi [{ganhador}]!')
-                        break
-            elif verificacao == "N":
-                break
+        try:
+            opcao = int(input('\nEscolha uma opção: '))
+        except ValueError:
+            print('Opção inválida, digite um número de 1 a 9.')
+            continue
 
-    elif opcao == 3:
-        print("\n--- HISTÓRICO DE RETIRADAS ---")
-        if len(historico) == 0:
-            print("Nenhuma retirada realizada ainda.")
-        else:
-            print(f'Os itens retirados e suas quantidades até o momento foram: {historico}.')
+        if opcao == 1:
+            consultar_estoque()
+            if confirmar('\nDeseja realizar a retirada de algum produto?'):
+                retirar_produtos(usuario)
+        elif opcao == 2:
+            retirar_produtos(usuario)
+        elif opcao == 3:
+            ver_historico()
+        elif opcao == 4:
+            repor_estoque(usuario, perfil)
+        elif opcao == 5:
+            cadastrar_produto(usuario, perfil)
+        elif opcao == 6:
+            buscar_produto()
+        elif opcao == 7:
+            estoque_baixo()
+        elif opcao == 8:
+            relatorio()
+        elif opcao == 9:
+            encerrar()
             break
+        else:
+            print('Opção inválida, escolha um número de 1 a 9.')
 
-    if opcao == 4:
-        print('Encerrando programa...')
-        break
-    elif opcao == 5:
-        repor_estoque()
-        continue
-    elif opcao == 6:
-        cadastrar_produto()
-        continue
-    elif opcao == 7:
-        buscar_produto()
-        continue
-    elif opcao == 8:
-        estoque_baixo()
-        continue
-    elif opcao == 9:
-        relatorio()
-        continue
 
-#FIM DO CODIGO
+if __name__ == '__main__':
+    main()
+
+#FIM DO PROGRAMAS
